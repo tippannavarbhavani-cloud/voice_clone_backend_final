@@ -1,0 +1,29 @@
+Django>=5.0,<5.1
+djangorestframework>=3.15
+djangorestframework-simplejwt>=5.3
+mysqlclient>=2.2
+python-dotenv>=1.0
+django-cors-headers>=4.4
+django-filter>=24.2
+
+# Audio ML / detection stack
+transformers>=4.42
+torch>=2.2
+torchaudio>=2.2
+librosa>=0.10
+soundfile>=0.12
+numpy>=1.26
+noisereduce>=3.0
+
+# Real-time / live-call support (WebSockets)
+channels>=4.1
+daphne>=4.1
+
+# URL-based analysis (downloads audio server-side)
+requests>=2.32
+
+# Serves static files (like the admin panel's CSS) in production
+whitenoise>=6.7
+
+# Optional but recommended for production
+gunicorn>=22.0

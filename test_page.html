@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!--
+  Simple manual test page for the recording + live-call features.
+  This is NOT part of the Django app — just double-click this file
+  to open it in your browser, no server needed to view it (though
+  your Django server does need to be running for it to actually work).
+
+  Steps:
+  1. Start your Django server:  python3 manage.py runserver 8001
+  2. Get a JWT access token (e.g. via Thunder Client login) and paste
+     it into the "Access token" box below.
+  3. Try "Record & Analyze" or "Start Live Call".
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voice Clone Detector - Manual Test Page</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; }
+  h2 { margin-top: 40px; }
+  input, button { font-size: 14px; padding: 8px; margin: 4px 0; }
+  input[type=text] { width: 100%; box-sizing: border-box; }
+  button { cursor: pointer; }
+  #log { background: #f4f4f4; padding: 12px; margin-top: 12px; white-space: pre-wrap; font-family: monospace; font-size: 13px; border-radius: 6px; min-height: 40px; }
+</style>
+</head>
+<body>
+
+<h1>Voice Clone Detector — Manual Test Page</h1>
+
+<label>API base URL</label>
+<input type="text" id="apiBase" value="http://127.0.0.1:8001">
+
+<label>Access token (paste from Thunder Client login response)</label>
+<input type="text" id="token" placeholder="eyJhbGciOi...">
+
+<h2>1. Record &amp; Analyze</h2>
+<button id="recordBtn">Start Recording</button>
+<button id="stopRecordBtn" disabled>Stop &amp; Analyze</button>
+
+<h2>2. Analyze by URL</h2>
+<input type="text" id="audioUrl" placeholder="https://example.com/sample.wav">
+<button id="urlBtn">Analyze URL</button>
+
+<h2>3. Live Call</h2>
+<button id="liveStartBtn">Start Live Call</button>
+<button id="liveStopBtn" disabled>End Call</button>
+
+<h2>Log</h2>
+<div id="log">Waiting...</div>
+
+<script>
+const log = (msg) => {
+  const el = document.getElementById("log");
+  el.textContent += "\n" + (typeof msg === "string" ? msg : JSON.stringify(msg, null, 2));
+  el.scrollTop = el.scrollHeight;
+};
+
+const apiBase = () => document.getElementById("apiBase").value.replace(/\/$/, "");
+const token = () => document.getElementById("token").value.trim();
+
+// ---------- 1. Record & Analyze ----------
+let mediaRecorder, recordedChunks = [];
+
+document.getElementById("recordBtn").onclick = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  mediaRecorder = new MediaRecorder(stream);
+  recordedChunks = [];
+  mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
+  mediaRecorder.start();
+  log("Recording... speak now.");
+  document.getElementById("recordBtn").disabled = true;
+  document.getElementById("stopRecordBtn").disabled = false;
+};
+
+document.getElementById("stopRecordBtn").onclick = () => {
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(recordedChunks, { type: "audio/webm" });
+    const formData = new FormData();
+    formData.append("audio_file", blob, "recording.webm");
+    formData.append("source", "recording");
+
+    log("Uploading recording for analysis...");
+    const res = await fetch(`${apiBase()}/api/detection/analyze/`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token()}` },
+      body: formData,
+    });
+    const data = await res.json();
+    log(`Risk: ${data.risk_level} (score ${data.risk_score}/100)`);
+    log(data);
+  };
+  mediaRecorder.stop();
+  document.getElementById("recordBtn").disabled = false;
+  document.getElementById("stopRecordBtn").disabled = true;
+};
+
+// ---------- 2. Analyze by URL ----------
+document.getElementById("urlBtn").onclick = async () => {
+  const audioUrl = document.getElementById("audioUrl").value.trim();
+  log(`Analyzing URL: ${audioUrl}`);
+  const res = await fetch(`${apiBase()}/api/detection/analyze-url/`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ audio_url: audioUrl }),
+  });
+  log(await res.json());
+};
+
+// ---------- 3. Live Call ----------
+let liveSocket, liveRecorder;
+
+document.getElementById("liveStartBtn").onclick = async () => {
+  const wsBase = apiBase().replace("http://", "ws://").replace("https://", "wss://");
+  liveSocket = new WebSocket(`${wsBase}/ws/live-detect/?token=${token()}`);
+
+  liveSocket.onopen = async () => {
+    log("Live socket connected.");
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    liveRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    liveRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0 && liveSocket.readyState === WebSocket.OPEN) {
+        liveSocket.send(e.data);
+      }
+    };
+    // Send a chunk every 2 seconds while the call is "live".
+    liveRecorder.start(2000);
+  };
+
+  liveSocket.onmessage = (event) => log(JSON.parse(event.data));
+  liveSocket.onclose = () => log("Live socket closed.");
+  liveSocket.onerror = (e) => log("Live socket error.");
+
+  document.getElementById("liveStartBtn").disabled = true;
+  document.getElementById("liveStopBtn").disabled = false;
+};
+
+document.getElementById("liveStopBtn").onclick = () => {
+  if (liveRecorder) liveRecorder.stop();
+  if (liveSocket && liveSocket.readyState === WebSocket.OPEN) {
+    liveSocket.send("stop");
+  }
+  document.getElementById("liveStartBtn").disabled = false;
+  document.getElementById("liveStopBtn").disabled = true;
+};
+</script>
+
+</body>
+</html>
